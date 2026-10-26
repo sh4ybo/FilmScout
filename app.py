@@ -18,16 +18,20 @@ def show_all_movies():
         page_size = int(request.args.get('ps'))
     page_start = page_size * (page_num - 1)
 
-    #search by title
+    #search by title and genre
+    query = {}
+
     if request.args.get('title'):
-        query = {
-            'title' : {
-                '$regex' : request.args.get('title'),
-                '$options' : 'i'
-            }
+        query['title'] = {
+            '$regex' : request.args.get('title'),
+            '$options' : 'i'
         }
-    else:
-        query = {}
+
+    if request.args.get('genres'):
+        genres = request.args.get('genres').split(',')
+        query['genres'] = {
+            '$all' : genres
+        }
 
     data_to_return = []
     for movie in movies.find(query).skip(page_start).limit(page_size):
