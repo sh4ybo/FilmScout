@@ -10,6 +10,7 @@ movies = db.movies
 #movies
 @app.route("/api/v1.0/movies", methods=["GET"])
 def show_all_movies():
+    #pagination
     page_num, page_size = 1,10
     if request.args.get('pn'):
         page_num = int(request.args.get('pn'))
@@ -17,8 +18,19 @@ def show_all_movies():
         page_size = int(request.args.get('ps'))
     page_start = page_size * (page_num - 1)
 
+    #search by title
+    if request.args.get('title'):
+        query = {
+            'title' : {
+                '$regex' : request.args.get('title'),
+                '$options' : 'i'
+            }
+        }
+    else:
+        query = {}
+
     data_to_return = []
-    for movie in movies.find().skip(page_start).limit(page_size):
+    for movie in movies.find(query).skip(page_start).limit(page_size):
         movie['_id'] = str(movie['_id'])
         total = 0
         count = 0
