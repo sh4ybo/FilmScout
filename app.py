@@ -1,11 +1,47 @@
 from flask import Flask, request, jsonify, make_response
 from pymongo import MongoClient
 from bson import ObjectId
+import datetime
+import bcrypt
+from functools import wraps
+import jwt
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'marley'
 client = MongoClient("mongodb://127.0.0.1:27017")
 db = client.film_scout
 movies = db.movies
+users = db.users
+blacklist = db.blacklist
+
+def jwt_required(func):
+    @wraps(func)
+    def jwt_required_wrapper(*args, **kwargs):
+        token = None
+        if 'x-access-token' in request.headers:
+            token = request.headers['x-access-token']
+        if not token:
+            return make_response( jsonify( { 'message' : 'Token is missing' } ), 401 )
+        try:
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms= 'HS256')
+        except:
+            return make_response( jsonify( { 'message' : 'Token is invalid' }), 401 )
+        bl_token = blacklist.find_one( {'token' : token})
+        if bl_token is not None:
+            return make_response(jsonify({'message' : 'Token has been cancelled'}), 401)
+        return func(*args, **kwargs)
+    return jwt_required_wrapper
+
+def admin_required(func):
+    @wraps(func)
+    def admin_required_wrapper(*args, **kwargs):
+        token = request.headers['x-access-token']
+        data = jwt.decode( token, app.config['SECRET_KEY'], algorithms='HS256')
+        if data['admin']:
+            return func(*args, **kwargs)
+        else:
+            return make_response(jsonify({'message' : 'admin required'}), 401)
+    return admin_required_wrapper
 
 #movies
 @app.route("/api/v1.0/movies", methods=["GET"])
@@ -62,6 +98,7 @@ def show_all_movies():
     return make_response( jsonify( data_to_return ), 200 )
 
 @app.route("/api/v1.0/movies/<string:id>", methods=["GET"])
+@jwt_required
 def show_one_movie(id):
     movie = movies.find_one( { '_id' : ObjectId(id) } )
     if movie is not None:
@@ -94,10 +131,10 @@ def show_one_movie(id):
 @app.route("/api/v1.0/movies", methods=['POST'])
 def add_movie():
 
-    if 'title' in request.form and 'genre' in request.form:
+    if 'title' in request.form and 'genres' in request.form:
         new_movie = {
             "title": request.form['title'],
-            "genre": request.form['genre'].split(','),
+            "genres": request.form['genres'].split(','),
             "rating": [],
             "reviews": []
         }
@@ -223,6 +260,32 @@ def delete_review(b_id, r_id):
     })
     return make_response(jsonify( {} ), 200)
 
+#auth
+@app.route("/api/v1.0/login", methods=["GET"])
+def login():
+    auth = request.authorization
+    if auth:
+        user = users.find_one( { 'username' : auth.username } )
+        if user is not None:
+            if bcrypt.checkpw( bytes( auth.password, 'UTF-8'), user['password']):
+                token = jwt.encode({
+                    'user':auth.username,
+                    'admin':user['admin'],
+                    'exp' : datetime.datetime.now( datetime.UTC ) + datetime.timedelta( minutes=30 )
+                }, app.config['SECRET_KEY'], algorithm='HS256')
+                return make_response(jsonify( { 'token' : token } ), 200 )
+            else:
+                return make_response( jsonify( {'message' : 'bad password' } ),401 )
+        else:
+            return make_response( jsonify( {'message' : 'bad username' } ), 401 )
+    return make_response(jsonify( {'message' : 'authentication required'} ), 401)
+
+@app.route("/api/v1.0/logout", methods=["GET"])
+@jwt_required
+def logout():
+    token = request.headers['x-access-token']
+    blacklist.insert_one({ 'token' : token})
+    return make_response(jsonify({ 'message' : 'Logout successful'}), 200)
 
 
 if __name__ == "__main__":
