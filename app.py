@@ -43,6 +43,8 @@ def admin_required(func):
             return make_response(jsonify({'message' : 'admin required'}), 401)
     return admin_required_wrapper
 
+
+
 #movies
 @app.route("/api/v1.0/movies", methods=["GET"])
 def show_all_movies():
@@ -129,13 +131,15 @@ def show_one_movie(id):
         return make_response(jsonify({'ERROR':'Invalid Movie ID'}), 404)
 
 @app.route("/api/v1.0/movies", methods=['POST'])
+@jwt_required
+@admin_required
 def add_movie():
 
     if 'title' in request.form and 'genres' in request.form:
         new_movie = {
             "title": request.form['title'],
             "genres": request.form['genres'].split(','),
-            "rating": [],
+            "ratings": [],
             "reviews": []
         }
         new_movie_id = movies.insert_one( new_movie )
@@ -145,12 +149,14 @@ def add_movie():
         return make_response(jsonify({'ERROR': 'Missing form data'}), 404)
 
 @app.route("/api/v1.0/movies/<string:id>", methods=['PUT'])
+@jwt_required
+@admin_required
 def update_movie(id):
-    if 'title' in request.form and 'genre' in request.form:
+    if 'title' in request.form and 'genres' in request.form:
         result = movies.update_one( { '_id' : ObjectId(id) } , {
             "$set" : {
                 "title" : request.form['title'],
-                "genre" : request.form['genre'],
+                "genres" : request.form['genres'].split(','),
             }
         } )
         if result.matched_count == 1:
@@ -162,6 +168,8 @@ def update_movie(id):
         return make_response(jsonify({'ERROR': 'Missing form data'}), 404)
 
 @app.route("/api/v1.0/movies/<string:id>", methods=['DELETE'])
+@jwt_required
+@admin_required
 def delete_business(id):
     result = movies.delete_one({'_id': ObjectId(id)})
     if result.deleted_count == 1:
@@ -171,6 +179,7 @@ def delete_business(id):
 
 #movie reviews
 @app.route("/api/v1.0/movies/<string:id>/reviews", methods=['POST'])
+@jwt_required
 def add_review(id):
     if 'username' in request.form and 'stars' in request.form and 'comment' in request.form:
         new_review = {
@@ -218,6 +227,7 @@ def get_one_review(b_id, r_id):
     return make_response(jsonify(movie['reviews'][0]), 200)
 
 @app.route("/api/v1.0/movies/<string:b_id>/reviews/<string:r_id>", methods=['PUT'])
+@jwt_required
 def edit_review(b_id, r_id):
     movie = movies.find_one({'_id': ObjectId(b_id)}, {"_id": 1})
     if movie is None:
@@ -241,6 +251,8 @@ def edit_review(b_id, r_id):
     return make_response(jsonify({"url": edited_review_url}), 200)
 
 @app.route("/api/v1.0/movies/<string:b_id>/reviews/<string:r_id>", methods=['DELETE'])
+@jwt_required
+@admin_required
 def delete_review(b_id, r_id):
     movie = movies.find_one({'_id': ObjectId(b_id)}, {"_id": 1})
     if movie is None:
@@ -286,6 +298,28 @@ def logout():
     token = request.headers['x-access-token']
     blacklist.insert_one({ 'token' : token})
     return make_response(jsonify({ 'message' : 'Logout successful'}), 200)
+
+@app.route("/api/v1.0/register", methods=["POST"])
+def register():
+    if 'name' in request.form and 'username' in request.form and 'password' in request.form and 'email' in request.form:
+        if users.find_one({'username' : request.form['username']}):
+            return make_response(jsonify({'message' : 'username already in use'}), 409)
+        if users.find_one({'email' : request.form['email']}):
+            return make_response(jsonify({'message': 'email already in use'}), 409)
+
+        new_user = {
+            "name": request.form['name'],
+            "username": request.form['username'],
+            "password": bcrypt.hashpw(bytes(request.form['password'], 'UTF-8'), bcrypt.gensalt()),
+            "email": request.form['email'],
+            "admin": False
+        }
+        users.insert_one(new_user)
+
+        return make_response(jsonify({'message' : 'user created'}), 201)
+    else:
+        return make_response(jsonify({'ERROR' : 'missing form data'}), 404)
+
 
 
 if __name__ == "__main__":
