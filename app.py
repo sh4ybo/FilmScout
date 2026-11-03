@@ -5,6 +5,7 @@ import datetime
 import bcrypt
 from functools import wraps
 import jwt
+import validators
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'marley'
@@ -40,8 +41,11 @@ def admin_required(func):
         if data['admin']:
             return func(*args, **kwargs)
         else:
-            return make_response(jsonify({'message' : 'admin required'}), 401)
+            return make_response(jsonify({'message' : 'admin required'}), 403)
     return admin_required_wrapper
+
+def valid_object_id(id):
+    return ObjectId.is_valid(id)
 
 def get_current_user():
     token = request.headers['x-access-token']
@@ -53,25 +57,39 @@ def get_current_user():
 def show_all_movies():
     #pagination
     page_num, page_size = 1,10
-    if request.args.get('pn'):
-        page_num = int(request.args.get('pn'))
-    if request.args.get('ps'):
-        page_size = int(request.args.get('ps'))
+    try:
+        if request.args.get('pn'):
+            page_num = int(request.args.get('pn'))
+        if request.args.get('ps'):
+            page_size = int(request.args.get('ps'))
+    except ValueError:
+        return make_response( jsonify( { 'ERROR' : 'Page size/number must be a number' } ), 400)
+
+    if page_size < 1 or page_size > 100:
+        return make_response(jsonify({'ERROR': 'Page size must be 1-100'}), 400)
+    if page_num <1 :
+        return make_response(jsonify({'ERROR': 'Page number must be at least 1'}), 400)
+
     page_start = page_size * (page_num - 1)
 
     #search by title and genre
     query = {}
+    title = request.args.get('title', '').strip()
+    genres = request.args.get('genres', '').strip()
 
-    if request.args.get('title'):
+    if title:
         query['title'] = {
-            '$regex' : request.args.get('title'),
+            '$regex' : title,
             '$options' : 'i'
         }
 
-    if request.args.get('genres'):
-        genres = request.args.get('genres').split(',')
+    if genres:
+        genre_list = [g.strip() for g in genres.split(',') if g.strip()]
+        if not genre_list:
+            return make_response(jsonify({'ERROR': 'Please enter valid genres'}), 400)
+
         query['genres'] = {
-            '$all' : genres
+            '$all' : genre_list
         }
 
     data_to_return = []
@@ -105,6 +123,9 @@ def show_all_movies():
 @app.route("/api/v1.0/movies/<string:id>", methods=["GET"])
 @jwt_required
 def show_one_movie(id):
+    if not valid_object_id(id):
+        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 400)
+
     movie = movies.find_one( { '_id' : ObjectId(id) } )
     if movie is not None:
         movie['_id'] = str(movie['_id'])
@@ -131,17 +152,27 @@ def show_one_movie(id):
 
         return make_response( jsonify(  movie ), 200 )
     else:
-        return make_response(jsonify({'ERROR':'Invalid Movie ID'}), 404)
+        return make_response(jsonify({'ERROR':'Invalid Movie ID'}), 400)
 
 @app.route("/api/v1.0/movies", methods=['POST'])
 @jwt_required
 @admin_required
 def add_movie():
+    title = request.form.get('title','').strip()
+    genres = request.form.get('genres','').strip()
+
+    if not title or not genres:
+        return make_response(jsonify({'ERROR': 'Title and Genres required'}), 400)
+
+    genre_list = [ genre.strip() for genre in genres.split(',') if genre.strip() ]
+
+    if not genre_list:
+        return make_response(jsonify({'ERROR': 'At least 1 genre is required'}), 400)
 
     if 'title' in request.form and 'genres' in request.form:
         new_movie = {
-            "title": request.form['title'],
-            "genres": request.form['genres'].split(','),
+            "title": title,
+            "genres": genre_list,
             "ratings": [],
             "reviews": []
         }
@@ -155,25 +186,39 @@ def add_movie():
 @jwt_required
 @admin_required
 def update_movie(id):
-    if 'title' in request.form and 'genres' in request.form:
-        result = movies.update_one( { '_id' : ObjectId(id) } , {
-            "$set" : {
-                "title" : request.form['title'],
-                "genres" : request.form['genres'].split(','),
-            }
-        } )
-        if result.matched_count == 1:
-            edited_movie_link = "http://localhost:5000/api/v1.0/movies/" + id
-            return make_response( jsonify({"url" : edited_movie_link} ), 200)
-        else:
-            return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 404)
+    if not valid_object_id(id):
+        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 400)
+
+    title = request.form.get('title','').strip()
+    genres = request.form.get('genres','').strip()
+
+    if not title or not genres:
+        return make_response(jsonify({'ERROR': 'Title and Genres required'}), 400)
+
+    genre_list = [ genre.strip() for genre in genres.split(',') if genre.strip() ]
+
+    if not genre_list:
+        return make_response(jsonify({'ERROR': 'At least 1 genre is required'}), 400)
+
+    result = movies.update_one( { '_id' : ObjectId(id) } , {
+        "$set" : {
+            "title" : title,
+            "genres" : genre_list,
+        }
+    } )
+    if result.matched_count == 1:
+        edited_movie_link = "http://localhost:5000/api/v1.0/movies/" + id
+        return make_response( jsonify({"url" : edited_movie_link} ), 200)
     else:
-        return make_response(jsonify({'ERROR': 'Missing form data'}), 404)
+        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 404)
 
 @app.route("/api/v1.0/movies/<string:id>", methods=['DELETE'])
 @jwt_required
 @admin_required
 def delete_business(id):
+    if not valid_object_id(id):
+        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 400)
+
     result = movies.delete_one({'_id': ObjectId(id)})
     if result.deleted_count == 1:
         return make_response( jsonify( {}), 200)
@@ -183,10 +228,13 @@ def delete_business(id):
 #movie reviews
 @app.route("/api/v1.0/movies/<string:id>/reviews", methods=['GET'])
 def get_all_reviews(id):
+    if not valid_object_id(id):
+        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 400)
+
     data_to_return = []
     movie = movies.find_one({'_id' : ObjectId(id)}, {'reviews':1 , '_id':0})
     if movie is not None:
-        for review in movie['reviews']:
+        for review in movie.get('reviews', []):
             review['_id'] = str(review['_id'])
             data_to_return.append(review)
         return make_response( jsonify( data_to_return), 200)
@@ -195,13 +243,22 @@ def get_all_reviews(id):
 
 @app.route("/api/v1.0/movies/<string:m_id>/reviews/<string:r_id>", methods=['GET'])
 def get_one_review(m_id, r_id):
+    if not valid_object_id(m_id):
+        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 400)
+    if not valid_object_id(r_id):
+        return make_response(jsonify({'ERROR': 'Invalid Review ID'}), 400)
+
     movie = movies.find_one({'_id' : ObjectId(m_id)}, {"_id" : 1})
     if movie is None:
-        return make_response(jsonify({ "ERROR" : "Invalid Movie ID"}))
+        return make_response(jsonify({ "ERROR" : "Invalid Movie ID"}), 404)
 
-    movie = movies.find_one({"reviews._id" : ObjectId(r_id)}, {"_id" : 0, "reviews.$" : 1})
+    movie = movies.find_one({
+        "_id" : ObjectId(m_id),
+        "reviews._id" : ObjectId(r_id)
+    },
+        {"_id" : 0, "reviews.$" : 1})
     if movie is None:
-        return make_response(jsonify({ "ERROR" : "Invalid Review ID"}))
+        return make_response(jsonify({ "ERROR" : "Invalid Review ID"}), 404)
 
     movie['reviews'][0]['_id'] = str(movie['reviews'][0]['_id'])
     return make_response(jsonify(movie['reviews'][0]), 200)
@@ -209,12 +266,24 @@ def get_one_review(m_id, r_id):
 @app.route("/api/v1.0/movies/<string:id>/reviews", methods=['POST'])
 @jwt_required
 def add_review(id):
+    if not valid_object_id(id):
+        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 400)
+
     username, admin = get_current_user()
-    if 'stars' in request.form and 'comment' in request.form:
+
+    stars = request.form.get('stars','').strip()
+    try:
+        stars = int(stars)
+    except ValueError:
+        return make_response( jsonify( {'ERROR' : 'Rating must be a number' } ), 400 )
+
+    if stars < 1 or stars >5:
+        return make_response(jsonify({'ERROR': 'Rating must between 1 and 5'}), 400)
+    if stars and 'comment' in request.form:
         new_review = {
             '_id' : ObjectId(),
             'username' : username,
-            'stars' : request.form['stars'],
+            'stars' : str(stars),
             'comment' : request.form['comment']
             }
         result = movies.update_one({ '_id' : ObjectId( id ) }, {
@@ -233,6 +302,11 @@ def add_review(id):
 @app.route("/api/v1.0/movies/<string:m_id>/reviews/<string:r_id>", methods=['PUT'])
 @jwt_required
 def edit_review(m_id, r_id):
+    if not valid_object_id(m_id):
+        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 400)
+    if not valid_object_id(r_id):
+        return make_response(jsonify({'ERROR': 'Invalid Review ID'}), 400)
+
     username, admin = get_current_user()
 
     movie = movies.find_one({'_id': ObjectId(m_id)}, {"_id": 1})
@@ -251,6 +325,18 @@ def edit_review(m_id, r_id):
     if review['username'] != username and not admin:
         return make_response(jsonify({'ERROR' : 'you cannot edit this review'}), 403)
 
+    stars = request.form.get('stars','').strip()
+
+    if not stars or not 'comment' in request.form:
+        return make_response(jsonify({'ERROR': 'Stars and comment required'}), 400)
+    try:
+        stars = int(stars)
+    except ValueError:
+        return make_response(jsonify({'ERROR': 'Rating must be a number'}), 400)
+
+    if stars < 1 or stars > 5:
+        return make_response(jsonify({'ERROR': 'Rating must between 1 and 5'}), 400)
+
     edited_review = {
         "reviews.$.stars": request.form['stars'],
         "reviews.$.comment": request.form['comment']
@@ -268,7 +354,13 @@ def edit_review(m_id, r_id):
 @app.route("/api/v1.0/movies/<string:m_id>/reviews/<string:r_id>", methods=['DELETE'])
 @jwt_required
 def delete_review(m_id, r_id):
+    if not valid_object_id(m_id):
+        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 400)
+    if not valid_object_id(r_id):
+        return make_response(jsonify({'ERROR': 'Invalid Review ID'}), 400)
+
     username, admin = get_current_user()
+
     movie = movies.find_one({'_id': ObjectId(m_id)}, {"_id": 1})
     if movie is None:
         return make_response(jsonify({"Error": "Invalid Movie ID"}), 404)
@@ -302,7 +394,7 @@ def delete_review(m_id, r_id):
 @app.route("/api/v1.0/login", methods=["GET"])
 def login():
     auth = request.authorization
-    if auth:
+    if not auth:
         user = users.find_one( { 'username' : auth.username } )
         if user is not None:
             if bcrypt.checkpw( bytes( auth.password, 'UTF-8'), user['password']):
@@ -327,24 +419,39 @@ def logout():
 
 @app.route("/api/v1.0/register", methods=["POST"])
 def register():
-    if 'name' in request.form and 'username' in request.form and 'password' in request.form and 'email' in request.form:
-        if users.find_one({'username' : request.form['username']}):
+    name = request.form.get('name', '').strip()
+    username = request.form.get('username','').strip()
+    password =request.form.get('password','').strip()
+    email = request.form.get('email', '').strip()
+
+    if name and username and password and email:
+        if len(username) < 3 or len(username) > 30:
+            return make_response(jsonify({'message': 'Username must be between 3 and 30 characters'}), 400)
+
+        if len(password) < 3 or len(password) > 30:
+            return make_response(jsonify({'message': 'Password must be between 3 and 30 characters'}), 400)
+
+        if not validators.email(email):
+            return make_response(jsonify({'message': 'Must enter valid email'}), 400)
+
+        if users.find_one({'username' : username }):
             return make_response(jsonify({'message' : 'username already in use'}), 409)
-        if users.find_one({'email' : request.form['email']}):
+
+        if users.find_one({'email' : email }):
             return make_response(jsonify({'message': 'email already in use'}), 409)
 
         new_user = {
-            "name": request.form['name'],
-            "username": request.form['username'],
-            "password": bcrypt.hashpw(bytes(request.form['password'], 'UTF-8'), bcrypt.gensalt()),
-            "email": request.form['email'],
+            "name": name,
+            "username": username,
+            "password": bcrypt.hashpw(bytes(password, 'UTF-8'), bcrypt.gensalt()),
+            "email": email,
             "admin": False
         }
         users.insert_one(new_user)
 
         return make_response(jsonify({'message' : 'user created'}), 201)
     else:
-        return make_response(jsonify({'ERROR' : 'missing form data'}), 404)
+        return make_response(jsonify({'ERROR' : 'missing form data'}), 400)
 
 
 
