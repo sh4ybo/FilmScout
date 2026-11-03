@@ -43,7 +43,10 @@ def admin_required(func):
             return make_response(jsonify({'message' : 'admin required'}), 401)
     return admin_required_wrapper
 
-
+def get_current_user():
+    token = request.headers['x-access-token']
+    data = jwt.decode(token, app.config['SECRET_KEY'], algorithms='HS256')
+    return data['user'], data['admin']
 
 #movies
 @app.route("/api/v1.0/movies", methods=["GET"])
@@ -178,13 +181,39 @@ def delete_business(id):
         return make_response(jsonify({'ERROR':'Invalid Movie ID'}), 404)
 
 #movie reviews
+@app.route("/api/v1.0/movies/<string:id>/reviews", methods=['GET'])
+def get_all_reviews(id):
+    data_to_return = []
+    movie = movies.find_one({'_id' : ObjectId(id)}, {'reviews':1 , '_id':0})
+    if movie is not None:
+        for review in movie['reviews']:
+            review['_id'] = str(review['_id'])
+            data_to_return.append(review)
+        return make_response( jsonify( data_to_return), 200)
+    else:
+        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 404)
+
+@app.route("/api/v1.0/movies/<string:m_id>/reviews/<string:r_id>", methods=['GET'])
+def get_one_review(m_id, r_id):
+    movie = movies.find_one({'_id' : ObjectId(m_id)}, {"_id" : 1})
+    if movie is None:
+        return make_response(jsonify({ "ERROR" : "Invalid Movie ID"}))
+
+    movie = movies.find_one({"reviews._id" : ObjectId(r_id)}, {"_id" : 0, "reviews.$" : 1})
+    if movie is None:
+        return make_response(jsonify({ "ERROR" : "Invalid Review ID"}))
+
+    movie['reviews'][0]['_id'] = str(movie['reviews'][0]['_id'])
+    return make_response(jsonify(movie['reviews'][0]), 200)
+
 @app.route("/api/v1.0/movies/<string:id>/reviews", methods=['POST'])
 @jwt_required
 def add_review(id):
-    if 'username' in request.form and 'stars' in request.form and 'comment' in request.form:
+    username, admin = get_current_user()
+    if 'stars' in request.form and 'comment' in request.form:
         new_review = {
             '_id' : ObjectId(),
-            'username' : request.form['username'],
+            'username' : username,
             'stars' : request.form['stars'],
             'comment' : request.form['comment']
             }
@@ -201,69 +230,66 @@ def add_review(id):
     else:
         return make_response(jsonify({'ERROR': 'Missing form data'}), 404)
 
-@app.route("/api/v1.0/movies/<string:id>/reviews", methods=['GET'])
-def get_all_reviews(id):
-    data_to_return = []
-    movie = movies.find_one({'_id' : ObjectId(id)}, {'reviews':1 , '_id':0})
-    if movie is not None:
-        for review in movie['reviews']:
-            review['_id'] = str(review['_id'])
-            data_to_return.append(review)
-        return make_response( jsonify( data_to_return), 200)
-    else:
-        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 404)
-
-@app.route("/api/v1.0/movies/<string:b_id>/reviews/<string:r_id>", methods=['GET'])
-def get_one_review(b_id, r_id):
-    movie = movies.find_one({'_id' : ObjectId(b_id)}, {"_id" : 1})
-    if movie is None:
-        return make_response(jsonify({ "ERROR" : "Invalid Movie ID"}))
-
-    movie = movies.find_one({"reviews._id" : ObjectId(r_id)}, {"_id" : 0, "reviews.$" : 1})
-    if movie is None:
-        return make_response(jsonify({ "ERROR" : "Invalid Review ID"}))
-
-    movie['reviews'][0]['_id'] = str(movie['reviews'][0]['_id'])
-    return make_response(jsonify(movie['reviews'][0]), 200)
-
-@app.route("/api/v1.0/movies/<string:b_id>/reviews/<string:r_id>", methods=['PUT'])
+@app.route("/api/v1.0/movies/<string:m_id>/reviews/<string:r_id>", methods=['PUT'])
 @jwt_required
-def edit_review(b_id, r_id):
-    movie = movies.find_one({'_id': ObjectId(b_id)}, {"_id": 1})
-    if movie is None:
-        return make_response(jsonify({"Error": "Invalid Business ID"}))
+def edit_review(m_id, r_id):
+    username, admin = get_current_user()
 
-    movie = movies.find_one({"reviews._id": ObjectId(r_id)}, {"_id": 0, "reviews.$": 1})
+    movie = movies.find_one({'_id': ObjectId(m_id)}, {"_id": 1})
     if movie is None:
-        return make_response(jsonify({"Error": "Invalid Review ID"}))
+        return make_response(jsonify({"Error": "Invalid Movie ID"}), 404)
+
+    movie = movies.find_one({
+        "_id": ObjectId(m_id),
+        "reviews._id": ObjectId(r_id)
+    },
+        {"_id": 0, "reviews.$": 1})
+    if movie is None:
+        return make_response(jsonify({"Error": "Invalid Review ID"}), 404)
+
+    review = movie['reviews'][0]
+    if review['username'] != username and not admin:
+        return make_response(jsonify({'ERROR' : 'you cannot edit this review'}), 403)
 
     edited_review = {
-        "reviews.$.username": request.form['username'],
         "reviews.$.stars": request.form['stars'],
         "reviews.$.comment": request.form['comment']
     }
     movies.update_one(
-        {"reviews._id": ObjectId(r_id)},
+        {
+            "_id": ObjectId(m_id),
+            "reviews._id": ObjectId(r_id)},
         {"$set": edited_review}
     )
-    edited_review_url = "http://localhost:5000/api/v1.0/movies/" + b_id \
+    edited_review_url = "http://localhost:5000/api/v1.0/movies/" + m_id \
                         + "/reviews/" + r_id
     return make_response(jsonify({"url": edited_review_url}), 200)
 
-@app.route("/api/v1.0/movies/<string:b_id>/reviews/<string:r_id>", methods=['DELETE'])
+@app.route("/api/v1.0/movies/<string:m_id>/reviews/<string:r_id>", methods=['DELETE'])
 @jwt_required
-@admin_required
-def delete_review(b_id, r_id):
-    movie = movies.find_one({'_id': ObjectId(b_id)}, {"_id": 1})
+def delete_review(m_id, r_id):
+    username, admin = get_current_user()
+    movie = movies.find_one({'_id': ObjectId(m_id)}, {"_id": 1})
     if movie is None:
-        return make_response(jsonify({"Error": "Invalid Movie ID"}))
+        return make_response(jsonify({"Error": "Invalid Movie ID"}), 404)
 
-    movie = movies.find_one({"reviews._id": ObjectId(r_id)}, {"_id": 0, "reviews.$": 1})
+    movie = movies.find_one({
+        "_id": ObjectId(m_id),
+        "reviews._id": ObjectId(r_id)
+    },
+        {"_id": 0,
+         "reviews.$": 1
+         }
+    )
     if movie is None:
-        return make_response(jsonify({"Error": "Invalid Review ID"}))
+        return make_response(jsonify({"Error": "Invalid Review ID"}), 404)
+
+    review = movie['reviews'][0]
+    if review['username'] != username and not admin:
+        return make_response(jsonify({'ERROR' : 'You cannot delete this review'}), 403)
 
     movies.update_one( {
-        "_id" : ObjectId(b_id)
+        "_id" : ObjectId(m_id)
     },{
         "$pull" : {
             "reviews" : {
