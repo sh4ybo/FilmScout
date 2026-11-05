@@ -32,7 +32,6 @@ def login():
     else:
             return make_response( jsonify( {'message' : 'bad username' } ), 401 )
 
-
 @auth_bp.route("/api/v1.0/logout", methods=["GET"])
 @jwt_required
 def logout():
@@ -74,4 +73,4 @@ def register():
 
         return make_response(jsonify({'message' : 'user created'}), 201)
     else:
-        return make_response(jsonify({'ERROR' : 'missing form data'}), 400)
+        return make_response(jsonify({'ERROR' : 'missing form data'}), 404)
