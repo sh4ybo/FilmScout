@@ -21,9 +21,9 @@ def show_all_movies():
         return make_response( jsonify( { 'ERROR' : 'Page size/number must be a number' } ), 400)
 
     if page_size < 1 or page_size > 100:
-        return make_response(jsonify({'ERROR': 'Page size must be 1-100'}), 400)
+        return make_response(jsonify( { 'ERROR': 'Page size must be 1-100' } ), 400)
     if page_num <1 :
-        return make_response(jsonify({'ERROR': 'Page number must be at least 1'}), 400)
+        return make_response(jsonify( { 'ERROR': 'Page number must be at least 1' } ), 400)
 
     page_start = page_size * (page_num - 1)
 
@@ -39,9 +39,9 @@ def show_all_movies():
         }
 
     if genres:
-        genre_list = [g.strip() for g in genres.split(',') if g.strip()]
+        genre_list = [genre.strip() for genre in genres.split(',') if genre.strip()]
         if not genre_list:
-            return make_response(jsonify({'ERROR': 'Please enter valid genres'}), 400)
+            return make_response(jsonify( { 'ERROR': 'Please enter valid genres' } ), 400)
 
         query['genres'] = {
             '$all' : genre_list
@@ -107,7 +107,7 @@ def show_one_movie(id):
 
         return make_response( jsonify(  movie ), 200 )
     else:
-        return make_response(jsonify({'ERROR':'Invalid Movie ID'}), 400)
+        return make_response(jsonify( { 'ERROR':'Invalid Movie ID' } ), 400)
 
 @movies_bp.route("/api/v1.0/movies", methods=['POST'])
 @jwt_required
@@ -117,12 +117,12 @@ def add_movie():
     genres = request.form.get('genres','').strip()
 
     if not title or not genres:
-        return make_response(jsonify({'ERROR': 'Title and Genres required'}), 400)
+        return make_response(jsonify( { 'ERROR': 'Title and Genres required' } ), 400)
 
     genre_list = [ genre.strip() for genre in genres.split(',') if genre.strip() ]
 
     if not genre_list:
-        return make_response(jsonify({'ERROR': 'At least 1 genre is required'}), 400)
+        return make_response(jsonify( { 'ERROR': 'At least 1 genre is required' } ), 400)
 
     if 'title' in request.form and 'genres' in request.form:
         new_movie = {
@@ -132,28 +132,28 @@ def add_movie():
             "reviews": []
         }
         new_movie_id = movies.insert_one( new_movie )
-        new_movie_link = "http://localhost:5000/api/v1.0/movies/" + str( new_movie_id.inserted_id)
+        new_movie_link = "http://localhost:5000/api/v1.0/movies/" + str( new_movie_id.inserted_id )
         return make_response(jsonify( { "url" : new_movie_link } ), 201)
     else:
-        return make_response(jsonify({'ERROR': 'Missing form data'}), 404)
+        return make_response(jsonify( { 'ERROR': 'Missing form data' } ), 404)
 
 @movies_bp.route("/api/v1.0/movies/<string:id>", methods=['PUT'])
 @jwt_required
 @admin_required
 def update_movie(id):
     if not valid_object_id(id):
-        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 400)
+        return make_response(jsonify( { 'ERROR': 'Invalid Movie ID' } ), 400)
 
     title = request.form.get('title','').strip()
     genres = request.form.get('genres','').strip()
 
     if not title or not genres:
-        return make_response(jsonify({'ERROR': 'Title and Genres required'}), 400)
+        return make_response(jsonify( { 'ERROR': 'Title and Genres required' } ), 400)
 
     genre_list = [ genre.strip() for genre in genres.split(',') if genre.strip() ]
 
     if not genre_list:
-        return make_response(jsonify({'ERROR': 'At least 1 genre is required'}), 400)
+        return make_response(jsonify( { 'ERROR': 'At least 1 genre is required' } ), 400)
 
     result = movies.update_one( { '_id' : ObjectId(id) } , {
         "$set" : {
@@ -163,19 +163,19 @@ def update_movie(id):
     } )
     if result.matched_count == 1:
         edited_movie_link = "http://localhost:5000/api/v1.0/movies/" + id
-        return make_response( jsonify({"url" : edited_movie_link} ), 200)
+        return make_response( jsonify( {"url" : edited_movie_link} ), 200)
     else:
-        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 404)
+        return make_response(jsonify( {'ERROR': 'Invalid Movie ID'} ), 400)
 
 @movies_bp.route("/api/v1.0/movies/<string:id>", methods=['DELETE'])
 @jwt_required
 @admin_required
 def delete_business(id):
     if not valid_object_id(id):
-        return make_response(jsonify({'ERROR': 'Invalid Movie ID'}), 400)
+        return make_response(jsonify( { 'ERROR': 'Invalid Movie ID' } ), 400)
 
-    result = movies.delete_one({'_id': ObjectId(id)})
+    result = movies.delete_one( { '_id': ObjectId(id) } )
     if result.deleted_count == 1:
         return make_response( jsonify( {}), 200)
     else:
-        return make_response(jsonify({'ERROR':'Invalid Movie ID'}), 404)
+        return make_response(jsonify( {'ERROR':'Invalid Movie ID'} ), 404)

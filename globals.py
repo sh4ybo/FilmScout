@@ -3,11 +3,13 @@ import jwt
 from bson import ObjectId
 from pymongo import MongoClient
 
+#db connection
 client = MongoClient("mongodb://127.0.0.1:27017")
 db = client.film_scout
 
 secret_key = 'marley'
 
+#helpers
 def valid_object_id(id):
     return ObjectId.is_valid(id)
 

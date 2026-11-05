@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask
 from blueprints.movies.movies import movies_bp
 from blueprints.reviews.reviews import reviews_bp
 from blueprints.auth.auth import auth_bp
